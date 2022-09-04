@@ -63,7 +63,9 @@ io.on("connection", (socket) => {
     })
 })
 
-
+app.get("/", (req, res) => {
+    res.send("API is running")
+})
 
 server.listen(3000, () => {
     console.log("Server is running")
