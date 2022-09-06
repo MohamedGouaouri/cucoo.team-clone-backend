@@ -6,65 +6,132 @@ const server = http.createServer(app);
 const { Server } = require("socket.io");
 const { clearInterval } = require('timers');
 const Timer = require('./timer');
+const {Room} = require('./room');
+
 const io = require('socket.io')(server, {
     cors: {
         origin: '*',
     }
 });
+const cors = require("cors")
+const bodyParser = require("body-parser")
+const randomstring = require("randomstring");
+
+
+app.use(cors())
+
+// Parse data as json
+app.use(bodyParser.urlencoded({ extended: true }))
+app.use(bodyParser.json())
 
 
 
-let timer = new Timer("00:25:00");
-let interval
+let rooms = {}
 
 io.on("connection", (socket) => {
-    console.log('a new coco connected');
-    socket.on("start", () => {
-        if (!timer.started) {
-            interval = setInterval(() => {
-                timer.started = true
-                // Call the update function and send the time value
-                timer.update()
-                // TODO: Change this to room sockets
-                io.sockets.emit("timer", {
-                    success: true,
-                    data: timer.timer,
-                    error: null
-                })
-                console.log(timer.timer)
 
-            }, 1000)
-        } else {
-            io.sockets.emit("timer", {
-                success: false,
-                data: null,
-                error: "Timer already started"
-            })
+    socket.on("join", (roomId, userId) => {
+        // Add socket to the room
+        let room = rooms[roomId]
+        if (room){
+            console.log(room)
+            room.addUser(userId)
+            socket.join(roomId)
+        }
+
+    })
+
+    socket.on("start", (roomId) => {
+        let room = rooms[roomId]
+        if (room){
+            if (!room.isTimerStarted()) {
+
+                room.interval = setInterval(() => {
+                    room.startTimer()
+                    io.to(roomId).emit("timer", {
+                        success: true,
+                        data: room.getTime(),
+                        error: null
+                    })
+                    console.log("[" + roomId + "]" + " " + room.getTime())
+                }, 1000)
+            } else {
+                io.to(roomId).emit("timer", {
+                    success: false,
+                    data: null,
+                    error: "Timer already started"
+                })
+            }
+
+        }else{
+            socket.emit("error", "room does not exist")
         }
     })
-    socket.on("stop", () => {
-        if (timer.started) {
-            timer.started = false
+    socket.on("stop", (roomId) => {
+        let room = rooms[roomId]
+        if (room){
+            if (room.isTimerStarted()) {
+                room.stopTimer()
+                io.to(roomId).emit("timer", {
+                    success: true,
+                    data: room.getTime(),
+                    error: null
+                })
 
-            clearInterval(interval)
-            // TODO: Change this to room sockets
-            io.sockets.emit("timer", {
-                success: true,
-                data: timer.timer,
-                error: null
-            })
-        } else {
-            io.sockets.emit("timer", {
-                success: false,
-                data: null,
-                error: "Timer already stopped"
-            })
+            } else {
+                io.to(roomId).emit("timer", {
+                    success: false,
+                    data: null,
+                    error: "Timer already stopped"
+                })
+            }
+        }else {
+            socket.emit("error", "room does not exist")
         }
+
     })
 })
 
 app.get("/", (req, res) => {
     res.send("API is running")
+})
+
+
+app.get("/create", (req ,res) => {
+    let data = req.body
+
+    let newRoom = new Room(
+        randomstring.generate(),
+        data.room_name,
+        new Timer(data.timer),
+        []
+    )
+
+
+
+    rooms[newRoom.roomId] = newRoom
+
+    return res.json({
+        success: true,
+        data: {
+            room_id: newRoom.roomId
+        },
+        error: null
+    })
+
+})
+
+
+app.get("/rooms", (req, res) => {
+    return res.json({
+        success: true,
+        data: Object.values(rooms),
+        error: null
+    })
+})
+
+app.get("/srooms", (req, res) => {
+    return res.json(io.sockets.adapter.rooms)
 })
 
 server.listen(3000, () => {
